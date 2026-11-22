@@ -9,6 +9,7 @@ from app.config import (
     REASON_DOUBLE_MIGRATION,
     REASON_NOT_ACTIVE,
     REASON_NOT_RUNNING,
+    REASON_PATH_DIVERGED,
     REASON_TEXT,
     TIER_ORDER,
     TIER_PREFIXES,
@@ -21,8 +22,8 @@ from app.services.core import (
     prefix_for_tier,
     replace_tier_prefix,
     require_tier,
+    same_path_predicate,
 )
-from app.services import migrate_accept_surface
 
 
 def _audit(conn, *, partition_id, event, job_id=None, from_tier="", to_tier="", reason_code="", reason=""):
@@ -80,12 +81,46 @@ def list_audit(partition_id: int | None = None):
         return [dict(r) for r in rows]
 
 
+def _refuse_diverged(conn, *, partition_id, tier, object_prefix, to_tier=""):
+    """接单证据分叉时的唯一收口：只落审计留痕，不建迁移单。
+
+    拒单单据会把分叉的 from/to 固化成「拧花」证据，故此处仅写审计，
+    占坑与温层的整笔回滚由启动对账（reconcile）统一执行。
+    """
+    want = prefix_for_tier(tier)
+    _audit(
+        conn, partition_id=partition_id, event=JOB_REJECTED,
+        from_tier=tier, to_tier=to_tier,
+        reason_code=REASON_PATH_DIVERGED,
+        reason=f"{REASON_TEXT[REASON_PATH_DIVERGED]}；现行前缀{object_prefix}，应重放为{want}",
+    )
+    conn.commit()
+    raise HTTPException(
+        409,
+        detail={
+            "code": REASON_PATH_DIVERGED,
+            "reason": REASON_TEXT[REASON_PATH_DIVERGED],
+            "tier": tier,
+            "object_prefix": object_prefix,
+            "want_prefix": want,
+        },
+    )
+
+
 def start_migrate(partition_id: int, to_tier: str):
     to_tier = require_tier(to_tier)
     with db() as conn:
         p = partition_row(conn, partition_id)
         from_tier = p["tier"]
         from_prefix = p["object_prefix"]
+
+        # 同路径谓词闸门①：接单前分区自身的「温层∪目录前缀」必须先能重放同一路径。
+        # 现行证据若已分叉（半截态残留），拒绝再占坑，交由启动对账收口，禁止假接单。
+        if not same_path_predicate(from_tier, from_prefix):
+            _refuse_diverged(
+                conn, partition_id=partition_id, tier=from_tier,
+                object_prefix=from_prefix, to_tier=to_tier,
+            )
 
         if p["status"] != "在册":
             code, text = REASON_NOT_ACTIVE, REASON_TEXT[REASON_NOT_ACTIVE]
@@ -105,6 +140,13 @@ def start_migrate(partition_id: int, to_tier: str):
             raise HTTPException(400, detail={"code": code, "reason": rule["reason"], "job_id": job_id})
 
         to_prefix = replace_tier_prefix(from_prefix, to_tier)
+        # 同路径谓词闸门②：落点前缀必须能由目标温层直接重放，
+        # 单据 from/to 与温层∪前缀三者锁定同一路径后才允许占坑。
+        if not same_path_predicate(to_tier, to_prefix):
+            _refuse_diverged(
+                conn, partition_id=partition_id, tier=to_tier,
+                object_prefix=to_prefix, to_tier=to_tier,
+            )
         try:
             cur = conn.execute(
                 '''INSERT INTO migrate_jobs(partition_id, from_tier, to_tier, status, created_at,
@@ -173,6 +215,22 @@ def finish_migrate(job_id: int, success: bool = True):
             # 同成败：温层列 + 目录前缀 + 对象键在同一事务提交，任一失败整体回滚到迁前快照。
             conn.execute("UPDATE partitions SET tier=? WHERE id=?", (j["to_tier"], p["id"]))
             _rewrite_object_keys(conn, p["id"], j["from_prefix"], j["to_prefix"])
+            # 同路径谓词闸门③：提交前重放校验——新温层必须能重放出新前缀，
+            # 单据 to_tier/to_prefix 与分区现状三者一致，对不上则抛错整笔回滚，禁止半截提交。
+            fresh = partition_row(conn, p["id"])
+            if not (
+                same_path_predicate(fresh["tier"], fresh["object_prefix"])
+                and fresh["tier"] == j["to_tier"]
+                and fresh["object_prefix"] == j["to_prefix"]
+            ):
+                raise HTTPException(
+                    500,
+                    detail={
+                        "code": REASON_PATH_DIVERGED,
+                        "reason": REASON_TEXT[REASON_PATH_DIVERGED],
+                        "job_id": job_id,
+                    },
+                )
             conn.execute(
                 "UPDATE migrate_jobs SET status=? WHERE id=?",
                 (JOB_DONE, job_id),
@@ -189,6 +247,17 @@ def finish_migrate(job_id: int, success: bool = True):
             "UPDATE partitions SET tier=?, object_prefix=? WHERE id=?",
             (j["snapshot_tier"], j["snapshot_prefix"], p["id"]),
         )
+        # 同路径谓词闸门④：回滚后的温层∪前缀也必须重放同一路径，否则不留半截态直接抛错回滚。
+        fresh = partition_row(conn, p["id"])
+        if not same_path_predicate(fresh["tier"], fresh["object_prefix"]):
+            raise HTTPException(
+                500,
+                detail={
+                    "code": REASON_PATH_DIVERGED,
+                    "reason": REASON_TEXT[REASON_PATH_DIVERGED],
+                    "job_id": job_id,
+                },
+            )
         conn.execute(
             "UPDATE migrate_jobs SET status=?, note=? WHERE id=?",
             (JOB_FAILED, "执行失败，温层与目录回滚到迁前快照", job_id),
@@ -223,11 +292,4 @@ def rule_book():
         "max_abs_gap": 1,
         "matrix": matrix,
     }
-
-_start_migrate_impl = start_migrate
-
-
-def start_migrate(partition_id: int, to_tier: str):
-    out = _start_migrate_impl(partition_id, to_tier)
-    return migrate_accept_surface.after_start(out)
 

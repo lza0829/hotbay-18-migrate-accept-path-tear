@@ -4,8 +4,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import PROJECT_NAME
 from app.routers import dashboard, migrates, partitions, retentions, settings, vaults, verify
 from app.seed import seed_if_empty
+from app.services.reconcile import reconcile_on_startup
 
 seed_if_empty()
+# 同路径谓词架构的唯一收口：启动先对账假接单/半截态/双占坑，再开始接单。
+reconcile_on_startup()
 
 app = FastAPI(title=PROJECT_NAME)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])

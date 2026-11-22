@@ -8,7 +8,6 @@ export default function Home() {
   const [err, setErr] = useState('')
   useEffect(() => { api.overview().then(setO).catch(e => setErr(e.message)) }, [])
   if (err) return <p className="err">{err}</p>
-  const _ok = o && o.surface_ok;
   if (!o) return <p className="muted">加载总览…</p>
   const tierCards = ['热档', '温档', '冷档'].map(k => [k, o[k]])
   const otherCards = [

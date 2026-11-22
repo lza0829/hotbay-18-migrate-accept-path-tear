@@ -6,10 +6,14 @@ from app.services.core import now, prefix_for_tier, require_tier, vault_partitio
 
 def list_partitions(conn=None):
     def _q(c):
+        # 占坑标记来自库内唯一执行中单（受 ux_migrate_running_partition 约束，至多一条），
+        # 分区温层列与归属前缀仍是同路径谓词下的真实现状，不用任何表面覆盖。
         rows = c.execute(
             '''SELECT p.*, v.name AS vault_name,
                       (SELECT COUNT(*) FROM clips c WHERE c.partition_id=p.id) AS clip_count,
-                      (SELECT COALESCE(SUM(bytes),0) FROM clips c WHERE c.partition_id=p.id) AS total_bytes
+                      (SELECT COALESCE(SUM(bytes),0) FROM clips c WHERE c.partition_id=p.id) AS total_bytes,
+                      (SELECT j.id FROM migrate_jobs j
+                          WHERE j.partition_id=p.id AND j.status='执行中' LIMIT 1) AS running_job_id
                FROM partitions p JOIN vaults v ON v.id=p.vault_id
                ORDER BY p.id DESC'''
         ).fetchall()

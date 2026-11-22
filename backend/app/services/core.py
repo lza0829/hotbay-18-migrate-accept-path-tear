@@ -69,6 +69,12 @@ def replace_tier_prefix(object_prefix: str, to_tier: str) -> str:
     rest = object_prefix.split("/", 1)[1] if "/" in object_prefix else ""
     return f"{TIER_PREFIXES[to_tier]}/{rest}"
 
-def surface_accept_hint(to_tier: str) -> dict:
-    return {"to_tier": to_tier, "panel": "accept"}
+
+def same_path_predicate(tier: str, object_prefix: str) -> bool:
+    """全局唯一同路径谓词：温层与目录归属前缀必须重放同一路径。
+
+    接单、完成、互证、启动对账全部经此判定，禁止旁路只改温层或只改色标。
+    温层 tier 可重放出 prefix_for_tier(tier)，且 object_prefix 必须落在该前缀下。
+    """
+    return bool(tier) and bool(object_prefix) and object_prefix.startswith(prefix_for_tier(tier))
 

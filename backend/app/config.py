@@ -28,6 +28,8 @@ REASON_CROSS_TIER = "cross-tier"
 REASON_NOT_ACTIVE = "not-active"
 REASON_DOUBLE_MIGRATION = "double-migration"
 REASON_NOT_RUNNING = "not-running"
+# 接单证据分叉：温层与目录前缀无法重放同一路径（半截态/残留），禁止占坑，先对账收口。
+REASON_PATH_DIVERGED = "path-diverged"
 
 REASON_TEXT = {
     REASON_SAME_TIER: "目标温层与现行相同，级差为零，不构成迁移",
@@ -35,4 +37,5 @@ REASON_TEXT = {
     REASON_NOT_ACTIVE: "仅在册分区可迁移",
     REASON_DOUBLE_MIGRATION: "同一分区已有执行中的迁移，拒绝并发双迁",
     REASON_NOT_RUNNING: "迁移单不在执行中",
+    REASON_PATH_DIVERGED: "温层与目录归属前缀无法重放同一路径，接单证据分叉，已拒绝占坑并待对账回滚",
 }

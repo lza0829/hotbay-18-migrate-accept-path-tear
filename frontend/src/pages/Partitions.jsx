@@ -67,7 +67,7 @@ export default function Partitions() {
       </form>
       <div className="table-wrap">
         <table>
-          <thead><tr><th>分区键</th><th>片名</th><th>温层</th><th>归属前缀</th><th>片库间</th><th>段数</th><th>状态</th></tr></thead>
+          <thead><tr><th>分区键</th><th>片名</th><th>温层</th><th>归属前缀</th><th>片库间</th><th>段数</th><th>占坑</th><th>状态</th></tr></thead>
           <tbody>
             {rows.map(r => (
               <tr key={r.id}>
@@ -75,7 +75,11 @@ export default function Partitions() {
                 <td>{r.title}</td>
                 <td><span className={`tier-badge ${tierClass(r.tier)}`}>{r.tier}</span></td>
                 <td><code>{r.object_prefix}</code></td>
-                <td>{r.vault_name}</td><td>{r.clip_count}</td><td>{r.status}</td>
+                <td>{r.vault_name}</td><td>{r.clip_count}</td>
+                <td>{r.running_job_id
+                  ? <span className="reason-chip">执行中单 #{r.running_job_id}</span>
+                  : <span className="muted">—</span>}</td>
+                <td>{r.status}</td>
               </tr>
             ))}
           </tbody>

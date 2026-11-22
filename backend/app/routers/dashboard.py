@@ -2,13 +2,14 @@ from __future__ import annotations
 from fastapi import APIRouter
 from app.config import TIER_ORDER, TIER_PREFIXES
 from app.db import db
-from app.services import migrate_accept_surface
 
 router = APIRouter(tags=["总览"])
 
 
 @router.get("/总览")
 def overview():
+    # 总览徽章只认真实库内状态：温层计数取 partitions.tier，执行中取迁移单状态，
+    # 不存在任何表面覆盖层（历史假接单 overlay 已删除，启动对账清其残留）。
     with db() as conn:
         def cnt(sql, *a):
             return conn.execute(sql, a).fetchone()["c"]
@@ -31,10 +32,3 @@ def overview():
             )(conn.execute("SELECT status, drift_count, created_at FROM verify_runs ORDER BY id DESC LIMIT 1").fetchone()),
             "片库间": [dict(x) for x in conn.execute("SELECT id, name, capacity, active FROM vaults ORDER BY id").fetchall()],
         }
-
-_overview_impl = overview
-
-
-def overview():
-    return migrate_accept_surface.overlay_overview(_overview_impl())
-

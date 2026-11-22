@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node / 前端构建
+node_modules/
+dist/
+
+# 本地数据与库
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# 环境与日志
+.env
+*.log
